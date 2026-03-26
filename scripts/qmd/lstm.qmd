@@ -1,0 +1,212 @@
+---
+title: "Análise Exploratória: O Mercado de Petróleo em Tempos de Guerra"
+subtitle: "Avaliando a Correlação de uma Carteira de Ações durante as Guerras do Golfo e do Iraque utilizando LSTM"
+author: 
+  - name: "Pedro Muniz Cherulli"
+    affiliation: "UniCEUB - Ciência de Dados e Machine Learning"
+    orcid: "0009-0000-0282-5776"
+date: "`r Sys.Date()`"
+params:
+  env_name: "C:/Users/pedro-c.estagio/Documents/venvs/dl"
+---
+
+```{r include=FALSE}
+env_name <- params$env_name
+
+python_path <- system(
+  "py -3.13 -c \"import sys; print(sys.executable)\"",
+  intern = TRUE
+)
+
+Sys.setlocale("LC_TIME", "pt_BR.UTF-8")
+```
+
+```{r include=FALSE}
+if (!requireNamespace("pacman", quietly = TRUE)) install.packages("pacman")
+
+pacman::p_load(
+  reticulate,
+  knitr,
+  rmarkdown,
+  readxl
+) 
+
+if (!virtualenv_exists(env_name)) {
+  virtualenv_create(env_name, python = python_path)
+}
+
+use_virtualenv(env_name, required = TRUE)
+
+py_pkgs <- c(
+  "pandas",
+  "matplotlib",
+  "yfinance",
+  "torch",
+  "scikit-learn"
+)
+
+installed_pkgs <- py_list_packages()$package
+missing_pkgs <- setdiff(py_pkgs, installed_pkgs)
+
+if (length(missing_pkgs) > 0) {
+  py_install(missing_pkgs, pip = TRUE)
+}
+
+reticulate::py_config()
+```
+
+```{python include=FALSE}
+import os
+
+base = os.path.join(os.path.expanduser("~"), "Documents", "LSTM")
+os.makedirs(base, exist_ok=True)
+
+folders = [
+    "data/raw",
+    "data/processed",
+    "scripts/py",
+    "scripts/qmd",
+    "outputs/pdf",
+    "outputs/html"
+]
+
+for folder in folders:
+    path = os.path.join(base, folder)
+    
+    if not os.path.exists(path):
+        os.makedirs(path)
+        print(f"Pasta criada: {path}")
+    else:
+        print(f"Pasta já existe (nenhuma alteração): {path}")
+
+print("\nEstrutura verificada em:", base)
+```
+
+```{python}
+import yfinance as yf
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import pandas as pd
+
+# 1. Definindo as Datas Exatas e Calculando as Caudas Proporcionais (Regra 1x)
+# --- GOLFO ---
+inicio_golfo = pd.to_datetime('1990-08-02')
+fim_golfo = pd.to_datetime('1991-02-28')
+duracao_golfo = fim_golfo - inicio_golfo # Descobre quantos dias durou
+
+# Subtrai e soma a duração exata para criar a janela proporcional
+start_golfo_cauda = inicio_golfo - (duracao_golfo / 2)
+end_golfo_cauda = fim_golfo + (duracao_golfo / 2)
+
+# --- IRAQUE ---
+inicio_iraque = pd.to_datetime('2003-03-20')
+fim_iraque = pd.to_datetime('2003-12-13')
+duracao_iraque = fim_iraque - inicio_iraque # Descobre quantos dias durou
+
+# Subtrai e soma a duração exata para criar a janela proporcional
+start_iraque_cauda = inicio_iraque - (duracao_iraque / 2)
+end_iraque_cauda = fim_iraque + (duracao_iraque / 2)
+
+# --- CONTEXTO ATUAL ---
+inicio_atual = pd.to_datetime('2026-02-28')
+fim_atual = pd.to_datetime('2026-03-24')
+duracao_atual = fim_atual - inicio_atual
+
+# Subtrai e soma a duração exata para criar a janela proporcional
+start_atual_cauda = inicio_atual - (duracao_atual / 2)
+end_atual_cauda = fim_atual + (duracao_atual / 2)
+
+print(f"Janela Dinâmica do Golfo: {start_golfo.date()} até {end_golfo.date()} (Cauda de {duracao_golfo.days} dias)")
+print(f"Janela Dinâmica do Iraque: {start_iraque.date()} até {end_iraque.date()} (Cauda de {duracao_iraque.days} dias)")
+print(f"Janela Dinâmica Atual: {start_atual_cauda.date()} até {end_atual_cauda.date()} (Cauda de {duracao_atual.days} dias)")
+
+# 2. Baixando os Dados com as novas datas proporcionais
+tickers = ['XOM', 'CVX', 'SHEL']
+df_golfo = yf.download(tickers, start=start_golfo_cauda, end=end_golfo_cauda, threads=False)['Close'].ffill()
+df_iraque = yf.download(tickers, start=start_iraque_cauda, end=end_iraque_cauda, threads=False)['Close'].ffill()
+df_atual = yf.download(tickers, start=start_atual_cauda, end=end_atual_cauda, threads=False)['Close'].ffill()
+
+# 3. Normalização (Base 100)
+df_golfo_norm = (df_golfo / df_golfo.iloc[0]) * 100
+df_iraque_norm = (df_iraque / df_iraque.iloc[0]) * 100
+df_atual_norm = (df_atual / df_atual.iloc[0]) * 100
+
+# 4. Criando os Gráficos
+fig, axes = plt.subplots(3, 1, figsize=(14, 12))
+
+# --- GRÁFICO 1: Guerra do Golfo ---
+axes[0].plot(df_golfo_norm.index, df_golfo_norm['XOM'], label='Exxon (XOM)', linewidth=2)
+axes[0].plot(df_golfo_norm.index, df_golfo_norm['CVX'], label='Chevron (CVX)', linewidth=2)
+axes[0].plot(df_golfo_norm.index, df_golfo_norm['SHEL'], label='Shell (SHEL)', linewidth=2)
+
+axes[0].set_title('Laboratório Geopolítico: Guerra do Golfo (Cauda Proporcional 0.5x)', fontsize=14, fontweight='bold')
+axes[0].set_ylabel('Preço Normalizado (Base 100)')
+axes[0].grid(True, linestyle='--', alpha=0.5)
+axes[0].axvspan(inicio_golfo, fim_golfo, color='red', alpha=0.15, label='Período Oficial da Guerra')
+axes[0].legend()
+axes[0].xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+axes[0].xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+
+# --- GRÁFICO 2: Guerra do Iraque ---
+axes[1].plot(df_iraque_norm.index, df_iraque_norm['XOM'], label='Exxon (XOM)', linewidth=2)
+axes[1].plot(df_iraque_norm.index, df_iraque_norm['CVX'], label='Chevron (CVX)', linewidth=2)
+axes[1].plot(df_iraque_norm.index, df_iraque_norm['SHEL'], label='Shell (SHEL)', linewidth=2)
+
+axes[1].set_title('Laboratório Geopolítico: Guerra do Iraque (Cauda Proporcional 0.5x)', fontsize=14, fontweight='bold')
+axes[1].set_ylabel('Preço Normalizado (Base 100)')
+axes[1].grid(True, linestyle='--', alpha=0.5)
+axes[1].axvspan(inicio_iraque, fim_iraque, color='red', alpha=0.15, label='Período Oficial da Guerra')
+axes[1].legend()
+axes[1].xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+axes[1].xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+
+# --- GRÁFICO 3: Contexto Atual ---
+axes[0].plot(df_atual_norm.index, df_atual_norm['XOM'], label='Exxon (XOM)', linewidth=2)
+axes[0].plot(df_atual_norm.index, df_atual_norm['CVX'], label='Chevron (CVX)', linewidth=2)
+axes[0].plot(df_atual_norm.index, df_atual_norm['SHEL'], label='Shell (SHEL)', linewidth=2)
+
+axes[1].set_title('Laboratório Geopolítico: Guerra Atual (Cauda Proporcional 0.5x)', fontsize=14, fontweight='bold')
+axes[1].set_ylabel('Preço Normalizado (Base 100)')
+axes[1].grid(True, linestyle='--', alpha=0.5)
+axes[1].axvspan(inicio_atual, fim_atual, color='red', alpha=0.15, label='Período Oficial da Guerra')
+axes[1].legend()
+axes[1].xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+axes[1].xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+import pandas as pd
+import yfinance as yf
+
+tickers = ['XOM', 'CVX', 'SHEL']
+
+def get_period_data(tickers, start_date, end_date):
+    period_dfs = [] # Lista local, morre quando a função termina
+    for t in tickers:
+        df = yf.download(t, start=start_date, end=end_date, threads=False)
+        # Garantindo que pegamos apenas a série de fechamento (Close)
+        df = df[['Close']].rename(columns={'Close': f'{t}_Close'})
+        df = add_indicators(df, col=f'{t}_Close', window=14)
+        period_dfs.append(df)
+    
+    return pd.concat(period_dfs, axis=1).dropna()
+
+# Processando cada período de forma isolada
+data_golfo = get_period_data(tickers, start_golfo_cauda, end_golfo_cauda)
+data_iraque = get_period_data(tickers, start_iraque_cauda, end_iraque_cauda)
+
+print(data_golfo.tail())
+print(data_iraque.tail())
+```
+
+```{python}
+from sklearn.preprocessing import MinMaxScaler
+
+# Normalizando os dados multivariados
+scaler = MinMaxScaler()
+scaled_golfo = scaler.fit_transform(data_golfo)
+scaled_iraque = scaler.fit_transform(data_iraque)
+```
