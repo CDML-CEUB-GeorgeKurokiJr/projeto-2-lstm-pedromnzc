@@ -17,7 +17,7 @@ editor:
 env_name <- params$env_name
 
 python_path <- system(
-  "py -3.13 -c \"import sys; print(sys.executable)\"",
+  "py -3.12 -c \"import sys; print(sys.executable)\"",
   intern = TRUE
 )
 

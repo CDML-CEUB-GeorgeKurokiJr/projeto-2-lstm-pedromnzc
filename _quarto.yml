@@ -2,6 +2,9 @@ project:
   type: default
   output-dir: "outputs/pdf"
 
+execute:
+  echo: false
+
 format:
   pdf:
     pdf-engine: xelatex
